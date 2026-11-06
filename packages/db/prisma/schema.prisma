@@ -1,0 +1,265 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  pending
+  approved
+  rejected
+}
+
+enum SeasonStatus {
+  registration
+  active
+  playoffs
+  finished
+}
+
+enum Race {
+  HUMAN
+  ORC
+  UNDEAD
+  NIGHT_ELF
+}
+
+enum MatchStatus {
+  scheduled
+  in_progress
+  reported
+  confirmed
+  voided
+}
+
+enum GameResult {
+  player1_win
+  player2_win
+  draw
+  voided
+}
+
+enum DiscordActionType {
+  assign_role
+  set_nickname
+  announce_approval
+  send_invite
+}
+
+enum DiscordActionStatus {
+  pending
+  processing
+  done
+  failed
+}
+
+enum ContentSlug {
+  rules
+  conduct
+  maps
+}
+
+enum DataSource {
+  real
+  sim
+}
+
+model User {
+  id                   String     @id @default(cuid())
+  discordId            String     @unique
+  discordUsername      String?
+  discordAvatar        String?
+  tournamentName       String?
+  avatarHeroSlug       String?
+  w3ChampionsUrl       String?
+  status               UserStatus @default(pending)
+  isAdmin              Boolean    @default(false)
+  needsProfanityReview Boolean    @default(false)
+  profanityMatches     Json?
+  acceptedRulesAt      DateTime?
+  acceptedConductAt    DateTime?
+  rejectionReason      String?
+  isSim                Boolean    @default(false)
+  source               DataSource @default(real)
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
+  combos       PlayerCombo[]
+  standings    Standing[]
+  reportsFiled Report[]      @relation("Reporter")
+  reportsAbout Report[]      @relation("Reported")
+  auditAsAdmin AdminAudit[]  @relation("AuditAdmin")
+  auditAsTarget AdminAudit[] @relation("AuditTarget")
+  matchesAsP1  Match[]       @relation("MatchP1")
+  matchesAsP2  Match[]       @relation("MatchP2")
+  discordActions DiscordAction[]
+
+  @@index([status])
+  @@index([isSim])
+  @@index([tournamentName])
+}
+
+model PlayerCombo {
+  id        String   @id @default(cuid())
+  userId    String
+  slot      Int
+  race      Race
+  heroSlug  String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, slot])
+  @@index([userId])
+}
+
+model Season {
+  id              String       @id @default(cuid())
+  name            String
+  status          SeasonStatus @default(registration)
+  currentWeek     Int          @default(0)
+  nextDeadline    DateTime?
+  finalsAt        DateTime?
+  registrationOpen Boolean     @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  matches   Match[]
+  standings Standing[]
+}
+
+model Match {
+  id          String      @id @default(cuid())
+  seasonId    String
+  week        Int
+  player1Id   String
+  player2Id   String
+  status      MatchStatus @default(scheduled)
+  bestOf      Int         @default(3)
+  scheduledAt DateTime?
+  reportedAt  DateTime?
+  isSim       Boolean     @default(false)
+  source      DataSource  @default(real)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  season  Season @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  player1 User   @relation("MatchP1", fields: [player1Id], references: [id])
+  player2 User   @relation("MatchP2", fields: [player2Id], references: [id])
+  games   Game[]
+
+  @@index([seasonId, week])
+  @@index([isSim])
+}
+
+model Game {
+  id            String      @id @default(cuid())
+  matchId       String
+  gameNumber    Int
+  mapName       String?
+  player1Race   Race?
+  player2Race   Race?
+  player1Hero   String?
+  player2Hero   String?
+  result        GameResult?
+  durationSec   Int?
+  createdAt     DateTime    @default(now())
+
+  match   Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  replays Replay[]
+
+  @@unique([matchId, gameNumber])
+}
+
+model Replay {
+  id           String   @id @default(cuid())
+  gameId       String
+  storagePath  String
+  originalName String?
+  uploadedAt   DateTime @default(now())
+  parsedOk     Boolean?
+  parseNotes   String?
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+}
+
+model Standing {
+  id              String   @id @default(cuid())
+  seasonId        String
+  userId          String
+  matchesPlayed   Int      @default(0)
+  wins            Int      @default(0)
+  losses          Int      @default(0)
+  draws           Int      @default(0)
+  gameWins        Int      @default(0)
+  gameLosses      Int      @default(0)
+  buchholz        Float    @default(0)
+  tiebreakerNotes String?
+  nextOpponentId  String?
+  placement       Int?
+  updatedAt       DateTime @updatedAt
+
+  season Season @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([seasonId, userId])
+}
+
+model Report {
+  id           String   @id @default(cuid())
+  reporterId   String
+  reportedId   String?
+  body         String
+  resolved     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  reporter User  @relation("Reporter", fields: [reporterId], references: [id])
+  reported User? @relation("Reported", fields: [reportedId], references: [id])
+}
+
+model ContentBlock {
+  id        String      @id @default(cuid())
+  slug      ContentSlug @unique
+  title     String
+  bodyMd    String
+  updatedAt DateTime    @updatedAt
+  updatedBy String?
+}
+
+model DiscordAction {
+  id          String              @id @default(cuid())
+  type        DiscordActionType
+  status      DiscordActionStatus @default(pending)
+  userId      String?
+  payload     Json?
+  error       String?
+  attempts    Int                 @default(0)
+  createdAt   DateTime            @default(now())
+  processedAt DateTime?
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+}
+
+model AdminAudit {
+  id         String   @id @default(cuid())
+  adminId    String
+  targetId   String?
+  action     String
+  detail     Json?
+  createdAt  DateTime @default(now())
+
+  admin  User  @relation("AuditAdmin", fields: [adminId], references: [id])
+  target User? @relation("AuditTarget", fields: [targetId], references: [id])
+}
+
+model ProfanityAllowlist {
+  id        String   @id @default(cuid())
+  term      String   @unique
+  note      String?
+  createdAt DateTime @default(now())
+}
