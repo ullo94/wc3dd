@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wc3dd}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wc3dd}
+      POSTGRES_DB: ${POSTGRES_DB:-wc3dd}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wc3dd} -d ${POSTGRES_DB:-wc3dd}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wc3dd}:${POSTGRES_PASSWORD:-wc3dd}@postgres:5432/${POSTGRES_DB:-wc3dd}
+      DATA_DIR: /app/data
+    volumes:
+      - ${DATA_DIR:-./data}:/app/data
+
+  bot:
+    build:
+      context: .
+      dockerfile: apps/bot/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wc3dd}:${POSTGRES_PASSWORD:-wc3dd}@postgres:5432/${POSTGRES_DB:-wc3dd}
+      DATA_DIR: /app/data
+    volumes:
+      - ${DATA_DIR:-./data}:/app/data
+
+volumes:
+  postgres_data:
